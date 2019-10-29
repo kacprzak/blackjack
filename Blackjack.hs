@@ -3,7 +3,32 @@ import System.Random
 import System.Random.Shuffle
 import Control.Monad.State
 
-type Card = Int
+data Suit = Club | Diamond | Heart | Spade deriving Show
+
+data Rank = Plain Int | Jack | Queen | King | Ace
+
+instance Show Rank where
+  show (Plain v) = show v
+  show Jack = "J"
+  show Queen = "Q"
+  show King = "K"
+  show Ace = "A"
+
+type Card = (Rank, Suit)
+
+cardValue :: Card -> [Int]
+cardValue (Plain v, _) = [v]
+cardValue (Ace, _) = [1, 11]
+cardValue _ = [10]
+
+handValue :: Hand -> [Int]
+handValue = foldr (liftM2 (+)) [0] . map cardValue
+
+isOver :: Int -> Hand -> Bool
+isOver val = null . filter (<=val) . handValue
+
+isBelow :: Int -> Hand -> Bool
+isBelow val = not . null . filter (<val) . handValue
 
 type Deck = [Card]
 type Hand = [Card]
@@ -14,19 +39,19 @@ data GameResult = Unfinished | Win | Lose | Push deriving Show
 
 type GameState = (Deck, Hand, Hand)
 
-prompt :: IO (String)
-prompt = putStr "> " >> hFlush stdout >> getLine
-
 frenchDeck :: Deck
-frenchDeck = concat . replicate 4 $ [2..10] ++ (replicate 3 10) ++ [11]
+frenchDeck = (,) <$> allRanks <*> allSuits
+  where
+    allRanks = (map Plain [2..10]) ++ [Jack, Queen, King, Ace]
+    allSuits = [Club, Diamond, Heart, Spade]
 
-fromString :: String -> Maybe PlayerAction
-fromString "h" = Just Hit
-fromString "s" = Just Stand
-fromString "d" = Just DoubleDown
-fromString "p" = Just Split
-fromString "u" = Just Surrender
-fromString _ = Nothing
+safeRead :: String -> Maybe PlayerAction
+safeRead "h" = Just Hit
+safeRead "s" = Just Stand
+safeRead "d" = Just DoubleDown
+safeRead "p" = Just Split
+safeRead "u" = Just Surrender
+safeRead _ = Nothing
 
 hitPlayer :: GameState -> GameState
 hitPlayer (d:ds, player, casino) = (ds, d:player, casino)
@@ -39,40 +64,44 @@ hitCasino ([], _, _) = error "No more cards in deck!"
 playerTurn :: PlayerAction -> State GameState Finished
 playerTurn Hit = do modify hitPlayer
                     (_, p, _) <- get
-                    return $ (sum p >= 21)
+                    return $ isOver 21 p
 playerTurn Stand = casinoTurn
 playerTurn _ = error ""
 
 casinoTurn :: State GameState Finished
 casinoTurn = do (_, _, c) <- get
-                if sum c < 17
+                if isBelow 17 c
                   then do modify hitCasino
                           casinoTurn
                   else return True
 
 result :: GameState -> GameResult
 result (_, player, casino)
-  | playerScore > 21 = Lose
-  | casinoScore > 21 = Win
-  | playerScore == casinoScore = Push
-  | playerScore > casinoScore = Win
+  | isOver 21 player = Lose
+  | isOver 21 casino = Win
+  | score player == score casino = Push
+  | score player > score casino = Win
   | otherwise = Lose
   where
-    casinoScore = sum casino
-    playerScore = sum player
+    score = maximum . filter (<=21) . handValue
+
+prompt :: IO (String)
+prompt = putStr "> " >> hFlush stdout >> getLine
   
 playerDecision :: IO PlayerAction
-playerDecision = do putStrLn "Hit, stand, double down, split or surrender? [h,s,d,p,u]"
-                    s <- prompt
-                    case (fromString s) of
-                      (Just d) -> return d
-                      Nothing -> playerDecision
+playerDecision = do
+  putStrLn "Hit, stand, double down, split or surrender? [h,s,d,p,u]"
+  s <- prompt
+  case (safeRead s) of
+    (Just d) -> return d
+    Nothing -> playerDecision
 
 render :: GameState -> IO ()
-render (_, player, casino) = do putStrLn $ "Casino: " ++ render' casino
-                                putStrLn $ "Player: " ++ render' player
-                             where render' cards = ((show . reverse) cards) ++ " (" ++
-                                                   ((show . sum) cards) ++ ")"
+render (_, player, casino) = do
+  putStrLn $ "Casino: " ++ render' casino
+  putStrLn $ "Player: " ++ render' player
+    where render' cards = ((show . (map fst) . reverse) cards) ++ " (" ++
+                          ((show . handValue) cards) ++ ")"
                                     
 gameLoop :: GameState -> IO GameResult
 gameLoop s = do render s
