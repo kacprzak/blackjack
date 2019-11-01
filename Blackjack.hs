@@ -67,7 +67,7 @@ data GameState = GameState {
 
 instance Show GameState where
   show s =
-    (showPlayer "Casino" (casinoHand s) (casinoAction s)) ++
+    (showPlayer "Casino" (casinoHand s) (casinoAction s)) ++ "\n" ++
     (showPlayer "Player" (playerHand s) (playerAction s))
     where showPlayer name cards lastAction =
             name ++ ": " ++ showCards cards ++ "\t" ++ showValue cards ++ " " ++ show lastAction
