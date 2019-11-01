@@ -65,6 +65,17 @@ data GameState = GameState {
   casinoAction :: PlayerAction
   }
 
+instance Show GameState where
+  show s =
+    (showPlayer "Casino" (casinoHand s) (casinoAction s)) ++
+    (showPlayer "Player" (playerHand s) (playerAction s))
+    where showPlayer name cards lastAction =
+            name ++ ": " ++ showCards cards ++ "\t" ++ showValue cards ++ " " ++ show lastAction
+          showCards cards = (concat . intersperse " " . map show . reverse) cards
+          showValue cards = "(" ++
+                            (concat . intersperse "/" . map show . handValues) cards ++
+                            ")"
+
 frenchDeck :: Deck
 frenchDeck = Card <$> allRanks <*> allSuits
   where
@@ -133,35 +144,26 @@ playerDecision = do
   case (safeRead s) of
     (Just d) -> return d
     Nothing -> playerDecision
-
-render :: GameState -> IO ()
-render (GameState _ player pa casino ca) = do
-  putStrLn $ "Casino: " ++ renderCards casino ++ "\t" ++ renderValue casino ++ " " ++ show ca
-  putStrLn $ "Player: " ++ renderCards player ++ "\t" ++ renderValue player ++ " " ++ show pa
-    where renderCards cards = (concat . intersperse " " . map show . reverse) cards
-          renderValue cards = "(" ++
-                              (concat . intersperse "/" . map show . handValues) cards ++
-                              ")"
                                     
 gameLoop :: GameState -> IO GameResult
-gameLoop s = do let turn = if playerAction s /= Stand
-                           then do d <- playerDecision
-                                   return $ playerTurn d
-                           else return $ casinoTurn
-                t <- turn
-                let (finished, s') = runState t s
-                putStrLn $ concat $ replicate 25 "-"
-                render s'
-                if not finished
-                  then gameLoop s'
-                  else return $ result s'
+gameLoop s = do
+  turn <- if playerAction s /= Stand
+          then do d <- playerDecision
+                  return $ playerTurn d
+          else return $ casinoTurn
+  let (finished, s') = runState turn s
+  putStrLn $ concat $ replicate 25 "-"
+  putStrLn $ show s'
+  if not finished
+    then gameLoop s'
+    else return $ result s'
 
 initGameState :: Deck -> GameState
 initGameState d = GameState (drop 4 d) (take 2 d) None (take 2 (drop 2 d)) None
 
 playGame :: Deck -> IO ()
 playGame d = let s = initGameState d
-             in do render s
+             in do putStrLn $ show s
                    gameLoop s >>= putStrLn . show
 
 main :: IO ()
