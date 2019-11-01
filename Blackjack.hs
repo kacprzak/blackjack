@@ -2,8 +2,15 @@ import System.IO
 import System.Random
 import System.Random.Shuffle
 import Control.Monad.State
+import Data.List
 
-data Suit = Club | Diamond | Heart | Spade deriving Show
+data Suit = Club | Diamond | Heart | Spade
+
+instance Show Suit where
+  show Club = [toEnum 9827]
+  show Diamond = [toEnum 9830]
+  show Heart = [toEnum 9829]
+  show Spade = [toEnum 9824]
 
 data Rank = Plain Int | Jack | Queen | King | Ace
 
@@ -14,11 +21,14 @@ instance Show Rank where
   show King = "K"
   show Ace = "A"
 
-type Card = (Rank, Suit)
+data Card = Card Rank Suit
+
+instance Show Card where
+  show (Card r s) = show r ++ show s
 
 cardValue :: Card -> [Int]
-cardValue (Plain v, _) = [v]
-cardValue (Ace, _) = [1, 11]
+cardValue (Card (Plain v) _) = [v]
+cardValue (Card Ace _) = [1, 11]
 cardValue _ = [10]
 
 handValue :: Hand -> [Int]
@@ -40,7 +50,7 @@ data GameResult = Unfinished | Win | Lose | Push deriving Show
 type GameState = (Deck, Hand, Hand)
 
 frenchDeck :: Deck
-frenchDeck = (,) <$> allRanks <*> allSuits
+frenchDeck = Card <$> allRanks <*> allSuits
   where
     allRanks = (map Plain [2..10]) ++ [Jack, Queen, King, Ace]
     allSuits = [Club, Diamond, Heart, Spade]
@@ -100,8 +110,8 @@ render :: GameState -> IO ()
 render (_, player, casino) = do
   putStrLn $ "Casino: " ++ render' casino
   putStrLn $ "Player: " ++ render' player
-    where render' cards = ((show . (map fst) . reverse) cards) ++ " (" ++
-                          ((show . handValue) cards) ++ ")"
+    where render' cards = ((concat . intersperse " " . map show . reverse) cards) ++ " (" ++
+                          ((concat . intersperse "/" . map show . handValue) cards) ++ ")"
                                     
 gameLoop :: GameState -> IO GameResult
 gameLoop s = do render s
