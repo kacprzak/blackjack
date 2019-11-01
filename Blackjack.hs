@@ -4,6 +4,9 @@ import System.Random.Shuffle
 import Control.Monad.State
 import Data.List
 
+sortUniq :: (Ord a) => [a] -> [a]
+sortUniq = map head . group . sort
+
 data Suit = Club | Diamond | Heart | Spade
 
 instance Show Suit where
@@ -24,30 +27,43 @@ instance Show Rank where
 data Card = Card Rank Suit
 
 instance Show Card where
-  show (Card r s) = show r ++ show s
+  show (Card r _) = show r -- ++ show s
 
 cardValue :: Card -> [Int]
 cardValue (Card (Plain v) _) = [v]
 cardValue (Card Ace _) = [1, 11]
 cardValue _ = [10]
 
-handValue :: Hand -> [Int]
-handValue = foldr (liftM2 (+)) [0] . map cardValue
+handValues :: Hand -> [Int]
+handValues = sortUniq . foldr (liftM2 (+)) [0] . map cardValue
+
+handValue :: Hand -> Int
+handValue h = if isOver 21 h
+              then minimum vs
+              else maximum . filter (<=21) $ vs
+  where
+    vs = handValues h
 
 isOver :: Int -> Hand -> Bool
-isOver val = null . filter (<=val) . handValue
+isOver val = all (>val) . handValues
 
 isBelow :: Int -> Hand -> Bool
-isBelow val = not . null . filter (<val) . handValue
+isBelow val = any (<val) . handValues
 
 type Deck = [Card]
 type Hand = [Card]
 type Finished = Bool
 
-data PlayerAction = Hit | Stand | DoubleDown | Split | Surrender
+data PlayerAction = None | Hit | Stand | DoubleDown | Split | Surrender deriving (Eq, Show)
 data GameResult = Unfinished | Win | Lose | Push deriving Show
 
-type GameState = (Deck, Hand, Hand)
+data GameState = GameState {
+  deck :: Deck,
+  playerHand :: Hand,
+  playerAction :: PlayerAction,
+  casinoHand :: Hand,
+  casinoAction :: PlayerAction
+  }
 
 frenchDeck :: Deck
 frenchDeck = Card <$> allRanks <*> allSuits
@@ -64,36 +80,48 @@ safeRead "u" = Just Surrender
 safeRead _ = Nothing
 
 hitPlayer :: GameState -> GameState
-hitPlayer (d:ds, player, casino) = (ds, d:player, casino)
-hitPlayer ([], _, _) = error "No more cards in deck!"
+hitPlayer (GameState (d:ds) ph _ ch ca) = GameState ds (d:ph) Hit ch ca
+hitPlayer (GameState [] _ _ _ _) = error "No more cards in deck!"
+
+standPlayer :: GameState -> GameState
+standPlayer s = s { playerAction = Stand }
 
 hitCasino :: GameState -> GameState
-hitCasino (d:ds, player, casino) = (ds, player, d:casino)
-hitCasino ([], _, _) = error "No more cards in deck!"
+hitCasino (GameState (d:ds) ph pa ch _) = GameState ds ph pa (d:ch) Hit
+hitCasino (GameState [] _ _ _ _) = error "No more cards in deck!"
+
+standCasino :: GameState -> GameState
+standCasino s = s { casinoAction = Stand }
+
+isFinished :: GameState -> Bool
+isFinished (GameState _ _ Stand _ Stand) = True
+isFinished (GameState _ ph _ ch _) = isOver 21 ph || isOver 21 ch
 
 playerTurn :: PlayerAction -> State GameState Finished
 playerTurn Hit = do modify hitPlayer
-                    (_, p, _) <- get
-                    return $ isOver 21 p
-playerTurn Stand = casinoTurn
+                    isFinished <$> get
+playerTurn Stand = do modify standPlayer
+                      isFinished <$> get
 playerTurn _ = error ""
 
 casinoTurn :: State GameState Finished
-casinoTurn = do (_, _, c) <- get
-                if isBelow 17 c
+casinoTurn = do (GameState _ _ _ ch _) <- get
+                if isBelow 17 ch
                   then do modify hitCasino
-                          casinoTurn
-                  else return True
+                          isFinished <$> get
+                  else do modify standCasino
+                          isFinished <$> get
 
 result :: GameState -> GameResult
-result (_, player, casino)
-  | isOver 21 player = Lose
-  | isOver 21 casino = Win
-  | score player == score casino = Push
-  | score player > score casino = Win
+result (GameState _ player _ casino _)
+  | playerResult > 21 = Lose
+  | casinoResult > 21 = Win
+  | playerResult == casinoResult = Push
+  | playerResult > casinoResult = Win
   | otherwise = Lose
   where
-    score = maximum . filter (<=21) . handValue
+    playerResult = handValue player
+    casinoResult = handValue casino
 
 prompt :: IO (String)
 prompt = putStr "> " >> hFlush stdout >> getLine
@@ -107,25 +135,36 @@ playerDecision = do
     Nothing -> playerDecision
 
 render :: GameState -> IO ()
-render (_, player, casino) = do
-  putStrLn $ "Casino: " ++ render' casino
-  putStrLn $ "Player: " ++ render' player
-    where render' cards = ((concat . intersperse " " . map show . reverse) cards) ++ " (" ++
-                          ((concat . intersperse "/" . map show . handValue) cards) ++ ")"
+render (GameState _ player pa casino ca) = do
+  putStrLn $ "Casino: " ++ renderCards casino ++ "\t" ++ renderValue casino ++ " " ++ show ca
+  putStrLn $ "Player: " ++ renderCards player ++ "\t" ++ renderValue player ++ " " ++ show pa
+    where renderCards cards = (concat . intersperse " " . map show . reverse) cards
+          renderValue cards = "(" ++
+                              (concat . intersperse "/" . map show . handValues) cards ++
+                              ")"
                                     
 gameLoop :: GameState -> IO GameResult
-gameLoop s = do render s
-                d <- playerDecision
-                let (finished, s') = runState (playerTurn d) s
+gameLoop s = do let turn = if playerAction s /= Stand
+                           then do d <- playerDecision
+                                   return $ playerTurn d
+                           else return $ casinoTurn
+                t <- turn
+                let (finished, s') = runState t s
+                putStrLn $ concat $ replicate 25 "-"
+                render s'
                 if not finished
                   then gameLoop s'
-                  else do render s'
-                          return $ result s'
+                  else return $ result s'
+
+initGameState :: Deck -> GameState
+initGameState d = GameState (drop 4 d) (take 2 d) None (take 2 (drop 2 d)) None
 
 playGame :: Deck -> IO ()
-playGame deck = gameLoop ((drop 4 deck), (take 2 deck), (take 2 (drop 2 deck))) >>= putStrLn . show
+playGame d = let s = initGameState d
+             in do render s
+                   gameLoop s >>= putStrLn . show
 
 main :: IO ()
 main = do g <- getStdGen
-          let deck = shuffle' frenchDeck (length frenchDeck) g
-          playGame deck
+          let d = shuffle' frenchDeck (length frenchDeck) g
+          playGame d
