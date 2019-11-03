@@ -4,9 +4,6 @@ import System.Random.Shuffle
 import Control.Monad.State
 import Data.List
 
-sortUniq :: (Ord a) => [a] -> [a]
-sortUniq = map head . group . sort
-
 data Suit = Club | Diamond | Heart | Spade
 
 instance Show Suit where
@@ -35,7 +32,7 @@ cardValue (Card Ace _) = [1, 11]
 cardValue _ = [10]
 
 handValues :: Hand -> [Int]
-handValues = sortUniq . foldr (liftM2 (+)) [0] . map cardValue
+handValues = sort . nub . foldr1 (liftM2 (+)) . map cardValue
 
 handValue :: Hand -> Int
 handValue h = if isOver 21 h
@@ -62,19 +59,17 @@ data GameState = GameState {
   playerHand :: Hand,
   playerAction :: PlayerAction,
   casinoHand :: Hand,
-  casinoAction :: PlayerAction
-  }
+  casinoAction :: PlayerAction }
 
 instance Show GameState where
   show s =
     (showPlayer "Casino" (casinoHand s) (casinoAction s)) ++ "\n" ++
     (showPlayer "Player" (playerHand s) (playerAction s))
-    where showPlayer name cards lastAction =
-            name ++ ": " ++ showCards cards ++ "\t" ++ showValue cards ++ " " ++ show lastAction
-          showCards cards = (concat . intersperse " " . map show . reverse) cards
-          showValue cards = "(" ++
-                            (concat . intersperse "/" . map show . handValues) cards ++
-                            ")"
+    where
+      showPlayer name cards lastAction =
+        name ++ ": " ++ showCards cards ++ "\t(" ++ showValue cards ++ ") " ++ show lastAction
+      showCards = intercalate " " . map show . reverse
+      showValue = intercalate "/" . map show . handValues
 
 frenchDeck :: Deck
 frenchDeck = Card <$> allRanks <*> allSuits
@@ -148,23 +143,26 @@ playerDecision = do
 gameLoop :: GameState -> IO GameResult
 gameLoop s = do
   turn <- if playerAction s /= Stand
-          then do d <- playerDecision
-                  return $ playerTurn d
-          else return $ casinoTurn
+          then playerDecision >>= return . playerTurn
+          else return casinoTurn
   let (finished, s') = runState turn s
   putStrLn $ concat $ replicate 25 "-"
-  putStrLn $ show s'
+  print s'
   if not finished
     then gameLoop s'
     else return $ result s'
 
 initGameState :: Deck -> GameState
-initGameState d = GameState (drop 4 d) (take 2 d) None (take 2 (drop 2 d)) None
+initGameState d = GameState { deck = drop 4 d
+                            , playerHand = take 2 (drop 2 d)
+                            , playerAction = None
+                            , casinoHand = take 2 d
+                            , casinoAction = None }
 
 playGame :: Deck -> IO ()
 playGame d = let s = initGameState d
-             in do putStrLn $ show s
-                   gameLoop s >>= putStrLn . show
+             in do print s
+                   gameLoop s >>= print
 
 main :: IO ()
 main = do g <- getStdGen
