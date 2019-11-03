@@ -31,21 +31,33 @@ cardValue (Card (Plain v) _) = [v]
 cardValue (Card Ace _) = [1, 11]
 cardValue _ = [10]
 
-handValues :: Hand -> [Int]
-handValues = sort . nub . foldr1 (liftM2 (+)) . map cardValue
+data Score = Busted { score :: Int } | Valid { score :: Int, isSoft :: Bool }
 
-handValue :: Hand -> Int
-handValue h = if isOver 21 h
-              then minimum vs
-              else maximum . filter (<=21) $ vs
+instance Eq Score where
+  (==) (Busted _) (Busted _) = True
+  (==) (Valid ls _) (Valid rs _) = ls == rs
+  (==) _ _ = False
+
+instance Ord Score where
+  compare (Busted _) (Busted _) = EQ
+  compare (Valid ls _) (Valid rs _) = compare ls rs
+  compare (Busted _) (Valid _ _) = LT
+  compare (Valid _ _) (Busted _) = GT
+
+instance Show Score where
+  show (Valid s True) = show (s-10) ++ "/" ++ show s
+  show s = show . score $ s
+
+isBusted :: Score -> Bool
+isBusted (Busted _) = True
+isBusted _ = False
+
+handScore :: Hand -> Score
+handScore h = if null valid
+              then Busted $ minimum busted
+              else Valid (maximum valid) (length valid > 1)
   where
-    vs = handValues h
-
-isOver :: Int -> Hand -> Bool
-isOver val = all (>val) . handValues
-
-isBelow :: Int -> Hand -> Bool
-isBelow val = any (<val) . handValues
+    (valid, busted) = span (<=21) . sort . nub . foldr1 (liftM2 (+)) . map cardValue $ h
 
 type Deck = [Card]
 type Hand = [Card]
@@ -69,7 +81,7 @@ instance Show GameState where
       showPlayer name cards lastAction =
         name ++ ": " ++ showCards cards ++ "\t(" ++ showValue cards ++ ") " ++ show lastAction
       showCards = intercalate " " . map show . reverse
-      showValue = intercalate "/" . map show . handValues
+      showValue = show . handScore
 
 frenchDeck :: Deck
 frenchDeck = Card <$> allRanks <*> allSuits
@@ -101,18 +113,21 @@ standCasino s = s { casinoAction = Stand }
 
 isFinished :: GameState -> Bool
 isFinished (GameState _ _ Stand _ Stand) = True
-isFinished (GameState _ ph _ ch _) = isOver 21 ph || isOver 21 ch
+isFinished (GameState _ ph _ ch _) = let playerSore = handScore ph
+                                         casinoScore = handScore ch
+                                     in isBusted playerSore || isBusted casinoScore
 
 playerTurn :: PlayerAction -> State GameState Finished
 playerTurn Hit = do modify hitPlayer
                     isFinished <$> get
 playerTurn Stand = do modify standPlayer
                       isFinished <$> get
-playerTurn _ = error ""
+playerTurn _ = error "Not implemented!"
 
 casinoTurn :: State GameState Finished
-casinoTurn = do (GameState _ _ _ ch _) <- get
-                if isBelow 17 ch
+casinoTurn = do s <- get
+                let cScore = handScore $ casinoHand s
+                if cScore < Valid 17 False || cScore <= Valid 17 True
                   then do modify hitCasino
                           isFinished <$> get
                   else do modify standCasino
@@ -120,14 +135,14 @@ casinoTurn = do (GameState _ _ _ ch _) <- get
 
 result :: GameState -> GameResult
 result (GameState _ player _ casino _)
-  | playerResult > 21 = Lose
-  | casinoResult > 21 = Win
-  | playerResult == casinoResult = Push
-  | playerResult > casinoResult = Win
+  | isBusted playerScore = Lose
+  | isBusted casinoScore = Win
+  | playerScore == casinoScore = Push
+  | playerScore > casinoScore = Win
   | otherwise = Lose
   where
-    playerResult = handValue player
-    casinoResult = handValue casino
+    playerScore = handScore player
+    casinoScore = handScore casino
 
 prompt :: IO (String)
 prompt = putStr "> " >> hFlush stdout >> getLine
