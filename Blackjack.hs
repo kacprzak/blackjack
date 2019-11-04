@@ -61,10 +61,9 @@ handScore h = if null valid
 
 type Deck = [Card]
 type Hand = [Card]
-type Finished = Bool
 
 data PlayerAction = None | Hit | Stand | DoubleDown | Split | Surrender deriving (Eq, Show)
-data GameResult = Unfinished | Win | Lose | Push deriving Show
+data GameResult = Unfinished | Win | Lose | Push deriving (Eq, Show)
 
 data GameState = GameState {
   deck :: Deck,
@@ -83,6 +82,13 @@ instance Show GameState where
       showCards = intercalate " " . map show . reverse
       showValue = show . handScore
 
+newGameState :: Deck -> GameState
+newGameState d = GameState { deck = drop 4 d
+                            , playerHand = take 2 (drop 2 d)
+                            , playerAction = None
+                            , casinoHand = take 2 d
+                            , casinoAction = None }      
+
 frenchDeck :: Deck
 frenchDeck = Card <$> allRanks <*> allSuits
   where
@@ -97,54 +103,56 @@ safeRead "p" = Just Split
 safeRead "u" = Just Surrender
 safeRead _ = Nothing
 
-hitPlayer :: GameState -> GameState
-hitPlayer (GameState (d:ds) ph _ ch ca) = GameState ds (d:ph) Hit ch ca
-hitPlayer (GameState [] _ _ _ _) = error "No more cards in deck!"
+-- STATE TRANSITIONS
 
-standPlayer :: GameState -> GameState
-standPlayer s = s { playerAction = Stand }
+playerHit :: GameState -> GameState
+playerHit (GameState (d:ds) ph _ ch ca) = GameState ds (d:ph) Hit ch ca
+playerHit (GameState [] _ _ _ _) = error "No more cards in deck!"
 
-hitCasino :: GameState -> GameState
-hitCasino (GameState (d:ds) ph pa ch _) = GameState ds ph pa (d:ch) Hit
-hitCasino (GameState [] _ _ _ _) = error "No more cards in deck!"
+playerStand :: GameState -> GameState
+playerStand s = s { playerAction = Stand }
 
-standCasino :: GameState -> GameState
-standCasino s = s { casinoAction = Stand }
+casinoHit :: GameState -> GameState
+casinoHit (GameState (d:ds) ph pa ch _) = GameState ds ph pa (d:ch) Hit
+casinoHit (GameState [] _ _ _ _) = error "No more cards in deck!"
 
-isFinished :: GameState -> Bool
-isFinished (GameState _ _ Stand _ Stand) = True
-isFinished (GameState _ ph _ ch _) = let playerSore = handScore ph
-                                         casinoScore = handScore ch
-                                     in isBusted playerSore || isBusted casinoScore
+casinoStand :: GameState -> GameState
+casinoStand s = s { casinoAction = Stand }
 
-playerTurn :: PlayerAction -> State GameState Finished
-playerTurn Hit = do modify hitPlayer
-                    isFinished <$> get
-playerTurn Stand = do modify standPlayer
-                      isFinished <$> get
+playerTurn :: PlayerAction -> State GameState ()
+playerTurn Hit = modify playerHit
+playerTurn Stand = modify playerStand
+playerTurn DoubleDown = do modify playerHit
+                           modify playerStand
 playerTurn _ = error "Not implemented!"
 
-casinoTurn :: State GameState Finished
+casinoTurn :: State GameState ()
 casinoTurn = do s <- get
-                let cScore = handScore $ casinoHand s
-                if cScore < Valid 17 False || cScore <= Valid 17 True
-                  then do modify hitCasino
-                          isFinished <$> get
-                  else do modify standCasino
-                          isFinished <$> get
+                let cs = handScore $ casinoHand s
+                modify $ if score cs < 17 || (score cs == 17 && isSoft cs)
+                         then casinoHit
+                         else casinoStand
 
 result :: GameState -> GameResult
-result (GameState _ player _ casino _)
-  | isBusted playerScore = Lose
-  | isBusted casinoScore = Win
+result (GameState _ player Stand casino Stand)
   | playerScore == casinoScore = Push
   | playerScore > casinoScore = Win
   | otherwise = Lose
   where
     playerScore = handScore player
     casinoScore = handScore casino
+result (GameState _ player _ casino _)
+  | score playerScore == 21 = if score casinoScore == 21 then Push else Win
+  | isBusted playerScore = Lose
+  | isBusted casinoScore = Win
+  | otherwise = Unfinished
+  where
+    playerScore = handScore player
+    casinoScore = handScore casino
 
-prompt :: IO (String)
+-- INPUT/OUTPUT
+
+prompt :: IO String
 prompt = putStr "> " >> hFlush stdout >> getLine
   
 playerDecision :: IO PlayerAction
@@ -160,22 +168,15 @@ gameLoop s = do
   turn <- if playerAction s /= Stand
           then playerDecision >>= return . playerTurn
           else return casinoTurn
-  let (finished, s') = runState turn s
+  let s' = execState turn s
   putStrLn $ concat $ replicate 25 "-"
   print s'
-  if not finished
+  if result s' == Unfinished
     then gameLoop s'
     else return $ result s'
 
-initGameState :: Deck -> GameState
-initGameState d = GameState { deck = drop 4 d
-                            , playerHand = take 2 (drop 2 d)
-                            , playerAction = None
-                            , casinoHand = take 2 d
-                            , casinoAction = None }
-
 playGame :: Deck -> IO ()
-playGame d = let s = initGameState d
+playGame d = let s = newGameState d
              in do print s
                    gameLoop s >>= print
 
