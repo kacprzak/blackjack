@@ -165,20 +165,17 @@ playerDecision = do
                                     
 gameLoop :: GameState -> IO GameResult
 gameLoop s = do
-  turn <- if playerAction s /= Stand
-          then playerDecision >>= return . playerTurn
-          else return casinoTurn
-  let s' = execState turn s
   putStrLn $ concat $ replicate 25 "-"
-  print s'
-  if result s' == Unfinished
-    then gameLoop s'
-    else return $ result s'
+  print s
+  if result s == Unfinished
+  then do turn <- if playerAction s /= Stand
+                  then playerDecision >>= return . playerTurn
+                  else return casinoTurn
+          gameLoop $ execState turn s
+  else return $ result s
 
 playGame :: Deck -> IO ()
-playGame d = let s = newGameState d
-             in do print s
-                   gameLoop s >>= print
+playGame d = gameLoop (newGameState d) >>= print
 
 main :: IO ()
 main = do g <- getStdGen
