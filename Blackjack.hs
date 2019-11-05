@@ -65,6 +65,12 @@ type Hand = [Card]
 data PlayerAction = None | Hit | Stand | DoubleDown | Split | Surrender deriving (Eq, Show)
 data GameResult = Unfinished | Win | Lose | Push deriving (Eq, Show)
 
+isPlayerFinished :: PlayerAction -> Bool
+isPlayerFinished Stand = True
+isPlayerFinished DoubleDown = True
+isPlayerFinished Surrender = True
+isPlayerFinished _ = False
+
 data GameState = GameState {
   deck :: Deck,
   playerHand :: Hand,
@@ -112,6 +118,12 @@ playerHit (GameState [] _ _ _ _) = error "No more cards in deck!"
 playerStand :: GameState -> GameState
 playerStand s = s { playerAction = Stand }
 
+playerDoubleDown :: GameState -> GameState
+playerDoubleDown s = s { playerAction = DoubleDown }
+
+playerSurrender :: GameState -> GameState
+playerSurrender s = s { playerAction = Surrender }
+
 casinoHit :: GameState -> GameState
 casinoHit (GameState (d:ds) ph pa ch _) = GameState ds ph pa (d:ch) Hit
 casinoHit (GameState [] _ _ _ _) = error "No more cards in deck!"
@@ -123,7 +135,8 @@ playerTurn :: PlayerAction -> State GameState ()
 playerTurn Hit = modify playerHit
 playerTurn Stand = modify playerStand
 playerTurn DoubleDown = do modify playerHit
-                           modify playerStand
+                           modify playerDoubleDown
+playerTurn Surrender = modify playerSurrender             
 playerTurn _ = error "Not implemented!"
 
 casinoTurn :: State GameState ()
@@ -134,14 +147,12 @@ casinoTurn = do s <- get
                          else casinoStand
 
 result :: GameState -> GameResult
-result (GameState _ player Stand casino Stand)
-  | playerScore == casinoScore = Push
-  | playerScore > casinoScore = Win
-  | otherwise = Lose
-  where
-    playerScore = handScore player
-    casinoScore = handScore casino
-result (GameState _ player _ casino _)
+result (GameState _ player pa casino ca)
+  | isPlayerFinished pa && isPlayerFinished ca =
+    case (compare playerScore casinoScore) of
+      GT -> Win
+      EQ -> Push
+      LT -> Lose
   | score playerScore == 21 = if score casinoScore == 21 then Push else Win
   | isBusted playerScore = Lose
   | isBusted casinoScore = Win
@@ -168,9 +179,9 @@ gameLoop s = do
   putStrLn $ concat $ replicate 25 "-"
   print s
   if result s == Unfinished
-  then do turn <- if playerAction s /= Stand
-                  then playerDecision >>= return . playerTurn
-                  else return casinoTurn
+  then do turn <- if isPlayerFinished $ playerAction s
+                  then return casinoTurn
+                  else playerDecision >>= return . playerTurn
           gameLoop $ execState turn s
   else return $ result s
 
