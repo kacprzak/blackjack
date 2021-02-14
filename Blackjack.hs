@@ -3,6 +3,7 @@ import System.Random
 import System.Random.Shuffle
 import Control.Monad.State
 import Data.List
+import Data.Char
 
 data Suit = Club | Diamond | Heart | Spade
 
@@ -12,10 +13,10 @@ instance Show Suit where
   show Heart = [toEnum 9829]
   show Spade = [toEnum 9824]
 
-data Rank = Plain Int | Jack | Queen | King | Ace
+data Rank = Numeral Int | Jack | Queen | King | Ace
 
 instance Show Rank where
-  show (Plain v) = show v
+  show (Numeral v) = show v
   show Jack = "J"
   show Queen = "Q"
   show King = "K"
@@ -24,10 +25,10 @@ instance Show Rank where
 data Card = Card Rank Suit
 
 instance Show Card where
-  show (Card r _) = show r -- ++ show s
+  show (Card r s) = show r ++ show s
 
 cardValue :: Card -> [Int]
-cardValue (Card (Plain v) _) = [v]
+cardValue (Card (Numeral v) _) = [v]
 cardValue (Card Ace _) = [1, 11]
 cardValue _ = [10]
 
@@ -98,7 +99,7 @@ newGameState d = GameState { deck = drop 4 d
 frenchDeck :: Deck
 frenchDeck = Card <$> allRanks <*> allSuits
   where
-    allRanks = (map Plain [2..10]) ++ [Jack, Queen, King, Ace]
+    allRanks = (map Numeral [2..10]) ++ [Jack, Queen, King, Ace]
     allSuits = [Club, Diamond, Heart, Spade]
 
 safeRead :: String -> Maybe PlayerAction
@@ -168,9 +169,9 @@ prompt = putStr "> " >> hFlush stdout >> getLine
   
 playerDecision :: IO PlayerAction
 playerDecision = do
-  putStrLn "Hit, stand, double down, split or surrender? [h,s,d,p,u]"
+  putStrLn "[H]it, [s]tand, [d]ouble down, s[p]lit or s[u]rrender?"
   s <- prompt
-  case (safeRead s) of
+  case (safeRead (map toLower s)) of
     (Just d) -> return d
     Nothing -> playerDecision
                                     
