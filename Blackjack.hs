@@ -1,7 +1,7 @@
 import System.IO
 import System.Random
 import System.Random.Shuffle
-import Control.Monad.State
+import Control.Monad.State.Lazy
 import Data.List
 import Data.Char
 
@@ -53,7 +53,7 @@ isBusted :: Score -> Bool
 isBusted (Busted _) = True
 isBusted _ = False
 
-handScore :: Hand -> Score
+handScore :: [Card] -> Score
 handScore h = if null valid
               then Busted $ minimum busted
               else Valid (maximum valid) (length valid > 1)
@@ -61,40 +61,65 @@ handScore h = if null valid
     (valid, busted) = span (<=21) . sort . nub . foldr1 (liftM2 (+)) . map cardValue $ h
 
 type Deck = [Card]
-type Hand = [Card]
+
+getCard :: State Deck Card
+getCard = do
+  s <- get
+  put $ tail s
+  return $ head s
+
+getCards :: Int -> State Deck [Card]
+getCards x = do
+  s <- get
+  put (drop x s)
+  return (take x s)
 
 data PlayerAction = None | Hit | Stand | DoubleDown | Split | Surrender deriving (Eq, Show)
 data GameResult = Unfinished | Win | Lose | Push deriving (Eq, Show)
 
-isPlayerFinished :: PlayerAction -> Bool
-isPlayerFinished Stand = True
-isPlayerFinished DoubleDown = True
-isPlayerFinished Surrender = True
-isPlayerFinished _ = False
+isPlayerFinished :: Player -> Bool
+isPlayerFinished p = isFinished $ lastAction p
+  where
+    isFinished Stand = True
+    isFinished DoubleDown = True
+    isFinished Surrender = True
+    isFinished _ = False
 
-data GameState = GameState {
+data Player = Player {
+  hand :: [Card],
+  lastAction :: PlayerAction
+}
+
+hit :: Player -> State Deck Player
+hit p = do
+  c <- getCard
+  return $ p { hand = (c:(hand p))
+             , lastAction = Hit }
+
+data Table = Table {
   deck :: Deck,
-  playerHand :: Hand,
-  playerAction :: PlayerAction,
-  casinoHand :: Hand,
-  casinoAction :: PlayerAction }
+  player :: Player,
+  casino :: Player }
 
-instance Show GameState where
+instance Show Table where
   show s =
-    (showPlayer "Casino" (casinoHand s) (casinoAction s)) ++ "\n" ++
-    (showPlayer "Player" (playerHand s) (playerAction s))
+    (showPlayer "Casino" (hand . casino $ s) (lastAction . casino $ s)) ++ "\n" ++
+    (showPlayer "Player" (hand . player $ s) (lastAction . player $ s))
     where
       showPlayer name cards lastAction =
         name ++ ": " ++ showCards cards ++ "\t(" ++ showValue cards ++ ") " ++ show lastAction
       showCards = intercalate " " . map show . reverse
       showValue = show . handScore
 
-newGameState :: Deck -> GameState
-newGameState d = GameState { deck = drop 4 d
-                            , playerHand = take 2 (drop 2 d)
-                            , playerAction = None
-                            , casinoHand = take 2 d
-                            , casinoAction = None }      
+newTable :: Deck -> Table
+newTable d = Table { deck = newDeck
+                            , player = Player h1 None
+                            , casino = Player h2 None }
+  where deal = do
+               h1 <- getCards 2
+               h2 <- getCards 2
+               return (h1, h2)
+        ((h1, h2), newDeck) = runState deal d
 
 frenchDeck :: Deck
 frenchDeck = Card <$> allRanks <*> allSuits
@@ -112,44 +137,39 @@ safeRead _ = Nothing
 
 -- STATE TRANSITIONS
 
-playerHit :: GameState -> GameState
-playerHit (GameState (d:ds) ph _ ch ca) = GameState ds (d:ph) Hit ch ca
-playerHit (GameState [] _ _ _ _) = error "No more cards in deck!"
+playerAction :: PlayerAction -> Player -> Player
+playerAction a p = p { lastAction = a }
 
-playerStand :: GameState -> GameState
-playerStand s = s { playerAction = Stand }
+playerHit :: Table -> Table
+playerHit gs = gs { deck = newDeck, player = newPlayer }
+  where (newPlayer, newDeck) = runState (hit (player gs)) (deck gs)
 
-playerDoubleDown :: GameState -> GameState
-playerDoubleDown s = s { playerAction = DoubleDown }
+gamePlayerAction :: PlayerAction -> Table -> Table
+gamePlayerAction a s = s { player = playerAction a (player s) }
 
-playerSurrender :: GameState -> GameState
-playerSurrender s = s { playerAction = Surrender }
+casinoHit :: Table -> Table
+casinoHit gs = gs { deck = newDeck, casino = newCasino }
+  where (newCasino, newDeck) = runState (hit (casino gs)) (deck gs)
 
-casinoHit :: GameState -> GameState
-casinoHit (GameState (d:ds) ph pa ch _) = GameState ds ph pa (d:ch) Hit
-casinoHit (GameState [] _ _ _ _) = error "No more cards in deck!"
+casinoStand :: Table -> Table
+casinoStand s = s { casino = playerAction Stand (casino s) }
 
-casinoStand :: GameState -> GameState
-casinoStand s = s { casinoAction = Stand }
-
-playerTurn :: PlayerAction -> State GameState ()
+playerTurn :: PlayerAction -> State Table ()
 playerTurn Hit = modify playerHit
-playerTurn Stand = modify playerStand
 playerTurn DoubleDown = do modify playerHit
-                           modify playerDoubleDown
-playerTurn Surrender = modify playerSurrender             
-playerTurn _ = error "Not implemented!"
+                           modify $ \s -> gamePlayerAction DoubleDown s
+playerTurn a = modify $ \s -> gamePlayerAction a s
 
-casinoTurn :: State GameState ()
+casinoTurn :: State Table ()
 casinoTurn = do s <- get
-                let cs = handScore $ casinoHand s
+                let cs = handScore $ hand $ casino s
                 modify $ if score cs < 17 || (score cs == 17 && isSoft cs)
                          then casinoHit
                          else casinoStand
 
-result :: GameState -> GameResult
-result (GameState _ player pa casino ca)
-  | isPlayerFinished pa && isPlayerFinished ca =
+result :: Table -> GameResult
+result (Table _ player casino)
+  | isPlayerFinished player && isPlayerFinished casino =
     case (compare playerScore casinoScore) of
       GT -> Win
       EQ -> Push
@@ -159,8 +179,8 @@ result (GameState _ player pa casino ca)
   | isBusted casinoScore = Win
   | otherwise = Unfinished
   where
-    playerScore = handScore player
-    casinoScore = handScore casino
+    playerScore = handScore $ hand player
+    casinoScore = handScore $ hand casino
 
 -- INPUT/OUTPUT
 
@@ -175,19 +195,19 @@ playerDecision = do
     (Just d) -> return d
     Nothing -> playerDecision
                                     
-gameLoop :: GameState -> IO GameResult
+gameLoop :: Table -> IO GameResult
 gameLoop s = do
   putStrLn $ concat $ replicate 25 "-"
   print s
   if result s == Unfinished
-  then do turn <- if isPlayerFinished $ playerAction s
+  then do turn <- if isPlayerFinished $ player s
                   then return casinoTurn
                   else playerDecision >>= return . playerTurn
           gameLoop $ execState turn s
   else return $ result s
 
 playGame :: Deck -> IO ()
-playGame d = gameLoop (newGameState d) >>= print
+playGame d = gameLoop (newTable d) >>= print
 
 main :: IO ()
 main = do g <- getStdGen
