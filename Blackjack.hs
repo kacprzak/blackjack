@@ -32,33 +32,15 @@ cardValue (Card (Numeral v) _) = [v]
 cardValue (Card Ace _) = [1, 11]
 cardValue _ = [10]
 
-data Score = Busted { score :: Int } | Valid { score :: Int, isSoft :: Bool }
+score :: [Card] -> [Int]
+score = sort . nub . foldr1 (liftM2 (+)) . map cardValue
 
-instance Eq Score where
-  (==) (Busted _) (Busted _) = True
-  (==) (Valid ls _) (Valid rs _) = ls == rs
-  (==) _ _ = False
-
-instance Ord Score where
-  compare (Busted _) (Busted _) = EQ
-  compare (Valid ls _) (Valid rs _) = compare ls rs
-  compare (Busted _) (Valid _ _) = LT
-  compare (Valid _ _) (Busted _) = GT
-
-instance Show Score where
-  show (Valid s True) = show (s-10) ++ "/" ++ show s
-  show s = show . score $ s
-
-isBusted :: Score -> Bool
-isBusted (Busted _) = True
-isBusted _ = False
-
-handScore :: [Card] -> Score
-handScore h = if null valid
-              then Busted $ minimum busted
-              else Valid (maximum valid) (length valid > 1)
+bestScore :: [Card] -> Int
+bestScore h = if null valid
+              then minimum busted
+              else maximum valid
   where
-    (valid, busted) = span (<=21) . sort . nub . foldr1 (liftM2 (+)) . map cardValue $ h
+    (valid, busted) = span (<=21) $ score h
 
 type Deck = [Card]
 
@@ -99,7 +81,8 @@ hit p = do
 data Table = Table {
   deck :: Deck,
   player :: Player,
-  casino :: Player }
+  casino :: Player
+}
 
 instance Show Table where
   show s =
@@ -109,7 +92,7 @@ instance Show Table where
       showPlayer name cards lastAction =
         name ++ ": " ++ showCards cards ++ "\t(" ++ showValue cards ++ ") " ++ show lastAction
       showCards = intercalate " " . map show . reverse
-      showValue = show . handScore
+      showValue = show . bestScore
 
 newTable :: Deck -> Table
 newTable d = Table { deck = newDeck
@@ -162,8 +145,8 @@ playerTurn a = modify $ \s -> gamePlayerAction a s
 
 casinoTurn :: State Table ()
 casinoTurn = do s <- get
-                let cs = handScore $ hand $ casino s
-                modify $ if score cs < 17 || (score cs == 17 && isSoft cs)
+                let cs = score $ hand $ casino s
+                modify $ if minimum cs < 17
                          then casinoHit
                          else casinoStand
 
@@ -174,13 +157,13 @@ result (Table _ player casino)
       GT -> Win
       EQ -> Push
       LT -> Lose
-  | score playerScore == 21 = if score casinoScore == 21 then Push else Win
-  | isBusted playerScore = Lose
-  | isBusted casinoScore = Win
+  | playerScore == 21 = if casinoScore == 21 then Push else Win
+  | playerScore > 21 = Lose
+  | casinoScore > 21 = Win
   | otherwise = Unfinished
   where
-    playerScore = handScore $ hand player
-    casinoScore = handScore $ hand casino
+    playerScore = bestScore $ hand player
+    casinoScore = bestScore $ hand casino
 
 -- INPUT/OUTPUT
 
