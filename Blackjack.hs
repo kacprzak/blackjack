@@ -94,7 +94,9 @@ playerTurn a = do s <- get
 casinoTurn :: State Table ()
 casinoTurn = do s <- get
                 let cs = score $ hand $ casino s
-                    action = if minimum cs < 17 then Hit else Stand
+                    bs = bestScore $ hand $ casino s
+                    action = if (bs < 17) || (bs == 17 && minimum cs < 17) then
+                      Hit else Stand
                     (c', d') = runState (playerAction action (casino s)) (deck s)
                 put s { deck = d', casino = c' }
 
