@@ -81,35 +81,22 @@ safeRead _ = Nothing
 
 -- STATE TRANSITIONS
 
-playerAction :: PlayerAction -> Player -> Player
-playerAction a p = p { lastAction = a }
-
-playerHit :: Table -> Table
-playerHit gs = gs { deck = newDeck, player = newPlayer }
-  where (newPlayer, newDeck) = runState (hit (player gs)) (deck gs)
-
-gamePlayerAction :: PlayerAction -> Table -> Table
-gamePlayerAction a s = s { player = playerAction a (player s) }
-
-casinoHit :: Table -> Table
-casinoHit gs = gs { deck = newDeck, casino = newCasino }
-  where (newCasino, newDeck) = runState (hit (casino gs)) (deck gs)
-
-casinoStand :: Table -> Table
-casinoStand s = s { casino = playerAction Stand (casino s) }
+playerAction :: PlayerAction -> Player -> State Deck Player
+playerAction Hit p = hit p
+playerAction DoubleDown p = hit p >>= playerAction DoubleDown
+playerAction a p = return $ p { lastAction = a }
 
 playerTurn :: PlayerAction -> State Table ()
-playerTurn Hit = modify playerHit
-playerTurn DoubleDown = do modify playerHit
-                           modify $ \s -> gamePlayerAction DoubleDown s
-playerTurn a = modify $ \s -> gamePlayerAction a s
+playerTurn a = do s <- get
+                  let (p', d') = runState (playerAction a (player s)) (deck s)
+                  put s { deck = d', player = p' }
 
 casinoTurn :: State Table ()
 casinoTurn = do s <- get
                 let cs = score $ hand $ casino s
-                modify $ if minimum cs < 17
-                         then casinoHit
-                         else casinoStand
+                    action = if minimum cs < 17 then Hit else Stand
+                    (c', d') = runState (playerAction action (casino s)) (deck s)
+                put s { deck = d', casino = c' }
 
 result :: Table -> GameResult
 result (Table _ player casino)
