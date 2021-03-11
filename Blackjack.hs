@@ -60,8 +60,8 @@ instance Show Table where
 
 newTable :: Deck -> Table
 newTable d = Table { deck = newDeck
-                            , player = Player h1 None
-                            , casino = Player h2 None }
+                   , player = Player h1 None
+                   , casino = Player h2 None }
   where deal = do
                h1 <- getCards 2
                h2 <- getCards 2
@@ -76,15 +76,10 @@ playerAction Hit p = hit p
 playerAction DoubleDown p = hit p >>= playerAction DoubleDown
 playerAction a p = return $ p { lastAction = a }
 
-playerTurn :: PlayerAction -> State Table ()
-playerTurn a = do s <- get
-                  let (p', d') = runState (playerAction a (player s)) (deck s)
-                  put s { deck = d', player = p' }
-
-casinoTurn :: PlayerAction -> State Table ()
-casinoTurn a = do s <- get
-                  let (c', d') = runState (playerAction a (casino s)) (deck s)
-                  put s { deck = d', casino = c' }
+playerTurn :: Player -> PlayerAction -> State Table ()
+playerTurn p a = do s <- get
+                    let (p', d') = runState (playerAction a p) (deck s)
+                    put s { deck = d', player = p' }
 
 result :: Table -> GameResult
 result (Table _ player casino)
@@ -123,8 +118,8 @@ playerDecision p = do
     Nothing -> playerDecision p
 
 casinoDecision :: Player -> IO PlayerAction
-casinoDecision p = let cs = score $ hand $ p
-                       bs = bestScore $ hand $ p
+casinoDecision p = let cs = score $ hand p
+                       bs = bestScore $ hand p
                        action = if (bs < 17) || (bs == 17 && minimum cs < 17)
                                 then Hit else Stand
                    in return action
@@ -135,8 +130,8 @@ gameLoop table = do
   print table
   if result table == Unfinished
   then do turn <- if isPlayerFinished $ player table
-                  then casinoDecision (casino table) >>= return . casinoTurn
-                  else playerDecision (player table) >>= return . playerTurn
+                  then casinoDecision (casino table) >>= return . playerTurn (casino table)
+                  else playerDecision (player table) >>= return . playerTurn (player table)
           gameLoop $ execState turn table
   else return $ result table
 
