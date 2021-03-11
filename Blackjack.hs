@@ -9,17 +9,14 @@ import Cards
 
 type Deck = [Card]
 
-getCard :: State Deck Card
-getCard = do
-  s <- get
-  put $ tail s
-  return $ head s
-
 getCards :: Int -> State Deck [Card]
 getCards x = do
   s <- get
   put (drop x s)
   return (take x s)
+
+getCard :: State Deck Card
+getCard = head <$> getCards 1
 
 data PlayerAction = None | Hit | Stand | DoubleDown | Split | Surrender deriving (Eq, Show)
 data GameResult = Unfinished | Win | Lose | Push deriving (Eq, Show)
@@ -71,13 +68,6 @@ newTable d = Table { deck = newDeck
                return (h1, h2)
         ((h1, h2), newDeck) = runState deal d
 
-safeRead :: String -> Maybe PlayerAction
-safeRead "h" = Just Hit
-safeRead "s" = Just Stand
-safeRead "d" = Just DoubleDown
-safeRead "p" = Just Split
-safeRead "u" = Just Surrender
-safeRead _ = Nothing
 
 -- STATE TRANSITIONS
 
@@ -91,14 +81,10 @@ playerTurn a = do s <- get
                   let (p', d') = runState (playerAction a (player s)) (deck s)
                   put s { deck = d', player = p' }
 
-casinoTurn :: State Table ()
-casinoTurn = do s <- get
-                let cs = score $ hand $ casino s
-                    bs = bestScore $ hand $ casino s
-                    action = if (bs < 17) || (bs == 17 && minimum cs < 17) then
-                      Hit else Stand
-                    (c', d') = runState (playerAction action (casino s)) (deck s)
-                put s { deck = d', casino = c' }
+casinoTurn :: PlayerAction -> State Table ()
+casinoTurn a = do s <- get
+                  let (c', d') = runState (playerAction a (casino s)) (deck s)
+                  put s { deck = d', casino = c' }
 
 result :: Table -> GameResult
 result (Table _ player casino)
@@ -117,27 +103,42 @@ result (Table _ player casino)
 
 -- INPUT/OUTPUT
 
+safeRead :: String -> Maybe PlayerAction
+safeRead "h" = Just Hit
+safeRead "s" = Just Stand
+safeRead "d" = Just DoubleDown
+safeRead "p" = Just Split
+safeRead "u" = Just Surrender
+safeRead _ = Nothing
+
 prompt :: IO String
 prompt = putStr "> " >> hFlush stdout >> getLine
   
-playerDecision :: IO PlayerAction
-playerDecision = do
+playerDecision :: Player -> IO PlayerAction
+playerDecision p = do
   putStrLn "[H]it, [s]tand, [d]ouble down, s[p]lit or s[u]rrender?"
   s <- prompt
   case (safeRead (map toLower s)) of
     (Just d) -> return d
-    Nothing -> playerDecision
+    Nothing -> playerDecision p
+
+casinoDecision :: Player -> IO PlayerAction
+casinoDecision p = let cs = score $ hand $ p
+                       bs = bestScore $ hand $ p
+                       action = if (bs < 17) || (bs == 17 && minimum cs < 17)
+                                then Hit else Stand
+                   in return action
                                     
 gameLoop :: Table -> IO GameResult
-gameLoop s = do
+gameLoop table = do
   putStrLn $ concat $ replicate 25 "-"
-  print s
-  if result s == Unfinished
-  then do turn <- if isPlayerFinished $ player s
-                  then return casinoTurn
-                  else playerDecision >>= return . playerTurn
-          gameLoop $ execState turn s
-  else return $ result s
+  print table
+  if result table == Unfinished
+  then do turn <- if isPlayerFinished $ player table
+                  then casinoDecision (casino table) >>= return . casinoTurn
+                  else playerDecision (player table) >>= return . playerTurn
+          gameLoop $ execState turn table
+  else return $ result table
 
 playGame :: Deck -> IO ()
 playGame d = gameLoop (newTable d) >>= print
