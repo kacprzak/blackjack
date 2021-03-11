@@ -22,12 +22,14 @@ data PlayerAction = None | Hit | Stand | DoubleDown | Split | Surrender deriving
 data GameResult = Unfinished | Win | Lose | Push deriving (Eq, Show)
 
 isPlayerFinished :: Player -> Bool
-isPlayerFinished p = isFinished $ lastAction p
+isPlayerFinished p
+  | bestScore (hand p) >= 21 = True
+  | la == Stand = True
+  | la == DoubleDown = True
+  | la == Surrender = True
+  | otherwise = False
   where
-    isFinished Stand = True
-    isFinished DoubleDown = True
-    isFinished Surrender = True
-    isFinished _ = False
+    la = lastAction p
 
 data Player = Player {
   hand :: [Card],
@@ -76,11 +78,7 @@ playerAction Hit p = hit p
 playerAction DoubleDown p = hit p >>= playerAction DoubleDown
 playerAction a p = return $ p { lastAction = a }
 
-playerTurn :: Player -> PlayerAction -> State Table ()
-playerTurn p a = do s <- get
-                    let (p', d') = runState (playerAction a p) (deck s)
-                    put s { deck = d', player = p' }
-
+-- TODO
 result :: Table -> GameResult
 result (Table _ player casino)
   | isPlayerFinished player && isPlayerFinished casino =
@@ -88,9 +86,6 @@ result (Table _ player casino)
       GT -> Win
       EQ -> Push
       LT -> Lose
-  | playerScore == 21 = if casinoScore == 21 then Push else Win
-  | playerScore > 21 = Lose
-  | casinoScore > 21 = Win
   | otherwise = Unfinished
   where
     playerScore = bestScore $ hand player
@@ -123,17 +118,25 @@ casinoDecision p = let cs = score $ hand p
                        action = if (bs < 17) || (bs == 17 && minimum cs < 17)
                                 then Hit else Stand
                    in return action
+
+playerLoop :: Player -> (Player -> IO PlayerAction) -> Deck -> IO (Player, Deck)
+playerLoop p logic deck = do
+  if isPlayerFinished p
+    then return (p, deck)
+    else do
+      action <- logic p
+      let (p', d') = runState (playerAction action p) deck
+      print p'
+      playerLoop p' logic d'
                                     
 gameLoop :: Table -> IO GameResult
 gameLoop table = do
   putStrLn $ concat $ replicate 25 "-"
   print table
-  if result table == Unfinished
-  then do turn <- if isPlayerFinished $ player table
-                  then casinoDecision (casino table) >>= return . playerTurn (casino table)
-                  else playerDecision (player table) >>= return . playerTurn (player table)
-          gameLoop $ execState turn table
-  else return $ result table
+  (p', d') <- playerLoop (player table) playerDecision (deck table)
+  -- TODO: no need for casino loop if player busted
+  (c', d'') <- playerLoop (casino table) casinoDecision (d')
+  return $ result $ table { deck = d'', player = p', casino = c' }
 
 playGame :: Deck -> IO ()
 playGame d = gameLoop (newTable d) >>= print
