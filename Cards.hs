@@ -31,7 +31,7 @@ instance Show Card where
 frenchDeck :: [Card]
 frenchDeck = Card <$> allRanks <*> allSuits
   where
-    allRanks = (map Numeral [2..10]) ++ [Jack, Queen, King, Ace]
+    allRanks = (Numeral <$> [2..10]) ++ [Jack, Queen, King, Ace]
     allSuits = [Club, Diamond, Heart, Spade]
 
 cardValue :: Card -> [Int]
@@ -39,12 +39,12 @@ cardValue (Card (Numeral v) _) = [v]
 cardValue (Card Ace _) = [1, 11]
 cardValue _ = [10]
 
-score :: [Card] -> [Int]
-score = sort . nub . foldr1 (liftM2 (+)) . map cardValue
+scores :: [Card] -> [Int]
+scores = sort . nub . foldr1 (liftM2 (+)) . map cardValue
 
-bestScore :: [Card] -> Int
-bestScore h = if null valid
-              then minimum busted
-              else maximum valid
+score :: [Card] -> Either Int Int
+score h = if null valid
+          then Left $ minimum busted
+          else Right $ maximum valid
   where
-    (valid, busted) = span (<=21) $ score h
+    (valid, busted) = span (<=21) $ scores h

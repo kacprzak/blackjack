@@ -4,6 +4,7 @@ import System.Random.Shuffle
 import Control.Monad.State.Lazy
 import Data.List
 import Data.Char
+import Data.Either
 
 import Cards
 
@@ -23,12 +24,13 @@ data GameResult = Unfinished | Win | Lose | Push deriving (Eq, Show)
 
 isPlayerFinished :: Player -> Bool
 isPlayerFinished p
-  | bestScore (hand p) >= 21 = True
+  | isLeft bs = True
   | la == Stand = True
   | la == DoubleDown = True
   | la == Surrender = True
   | otherwise = False
   where
+    bs = score $ hand p
     la = lastAction p
 
 data Player = Player {
@@ -41,7 +43,7 @@ instance Show Player where
     showCards hand ++ "\t(" ++ showScore hand ++ ")\t" ++ show lastAction
     where
       showCards = intercalate " " . map show . reverse
-      showScore = show . bestScore
+      showScore = show . score
 
 hit :: Player -> State Deck Player
 hit p = do
@@ -88,8 +90,8 @@ result (Table _ player casino)
       LT -> Lose
   | otherwise = Unfinished
   where
-    playerScore = bestScore $ hand player
-    casinoScore = bestScore $ hand casino
+    playerScore = score $ hand player
+    casinoScore = score $ hand casino
 
 -- INPUT/OUTPUT
 
@@ -113,8 +115,8 @@ playerDecision p = do
     Nothing -> playerDecision p
 
 casinoDecision :: Player -> IO PlayerAction
-casinoDecision p = let cs = score $ hand p
-                       bs = bestScore $ hand p
+casinoDecision p = let cs = scores $ hand p
+                       bs = fromRight 22 $ score $ hand p
                        action = if (bs < 17) || (bs == 17 && minimum cs < 17)
                                 then Hit else Stand
                    in return action
