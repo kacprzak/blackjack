@@ -5,6 +5,7 @@ module Cards where
 import Control.Monad
 import Data.List
 import Data.Char
+import Data.Functor.Classes
 
 data Suit = Club | Diamond | Heart | Spade
 
@@ -29,7 +30,7 @@ instance Show Card where
   show (Card r s) = show r ++ show s
 
 frenchDeck :: [Card]
-frenchDeck = Card <$> allRanks <*> allSuits
+frenchDeck = Card <$> allRanks <*>  allSuits
   where
     allRanks = (Numeral <$> [2..10]) ++ [Jack, Queen, King, Ace]
     allSuits = [Club, Diamond, Heart, Spade]
@@ -48,3 +49,7 @@ score h = if null valid
           else Right $ maximum valid
   where
     (valid, busted) = span (<=21) $ scores h
+
+compareScore :: Either Int Int -> Either Int Int -> Ordering
+compareScore (Left _) (Left _) = EQ
+compareScore x y = compare2 x y

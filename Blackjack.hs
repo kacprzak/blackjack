@@ -20,11 +20,11 @@ getCard :: State Deck Card
 getCard = head <$> getCards 1
 
 data PlayerAction = None | Hit | Stand | DoubleDown | Split | Surrender deriving (Eq, Show)
-data GameResult = Unfinished | Win | Lose | Push deriving (Eq, Show)
 
 isPlayerFinished :: Player -> Bool
 isPlayerFinished p
   | isLeft bs = True
+  | bs == (Right 21) = True
   | la == Stand = True
   | la == DoubleDown = True
   | la == Surrender = True
@@ -81,17 +81,13 @@ playerAction DoubleDown p = hit p >>= playerAction DoubleDown
 playerAction a p = return $ p { lastAction = a }
 
 -- TODO
-result :: Table -> GameResult
+result :: Table -> Maybe Ordering
 result (Table _ player casino)
-  | isPlayerFinished player && isPlayerFinished casino =
-    case (compare playerScore casinoScore) of
-      GT -> Win
-      EQ -> Push
-      LT -> Lose
-  | otherwise = Unfinished
+  | isPlayerFinished player && isPlayerFinished casino = return $ compareScore ps cs
+  | otherwise = Nothing
   where
-    playerScore = score $ hand player
-    casinoScore = score $ hand casino
+    ps = score $ hand player
+    cs = score $ hand casino
 
 -- INPUT/OUTPUT
 
@@ -131,7 +127,7 @@ playerLoop p logic deck = do
       print p'
       playerLoop p' logic d'
                                     
-gameLoop :: Table -> IO GameResult
+gameLoop :: Table -> IO (Maybe Ordering)
 gameLoop table = do
   putStrLn $ concat $ replicate 25 "-"
   print table
