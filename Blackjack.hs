@@ -80,15 +80,6 @@ playerAction Hit p = hit p
 playerAction DoubleDown p = hit p >>= playerAction DoubleDown
 playerAction a p = return $ p { lastAction = a }
 
--- TODO
-result :: Table -> Maybe Ordering
-result (Table _ player casino)
-  | isPlayerFinished player && isPlayerFinished casino = return $ compareScore ps cs
-  | otherwise = Nothing
-  where
-    ps = score $ hand player
-    cs = score $ hand casino
-
 -- INPUT/OUTPUT
 
 safeRead :: String -> Maybe PlayerAction
@@ -126,15 +117,15 @@ playerLoop p logic deck = do
       let (p', d') = runState (playerAction action p) deck
       print p'
       playerLoop p' logic d'
-                                    
-gameLoop :: Table -> IO (Maybe Ordering)
+
+gameLoop :: Table -> IO Ordering
 gameLoop table = do
   putStrLn $ concat $ replicate 25 "-"
   print table
   (p', d') <- playerLoop (player table) playerDecision (deck table)
   -- TODO: no need for casino loop if player busted
-  (c', d'') <- playerLoop (casino table) casinoDecision (d')
-  return $ result $ table { deck = d'', player = p', casino = c' }
+  (c', _) <- playerLoop (casino table) casinoDecision (d')
+  return $ compareScore (score $ hand p') (score $ hand c')
 
 playGame :: Deck -> IO ()
 playGame d = gameLoop (newTable d) >>= print
