@@ -22,8 +22,8 @@ data PlayerAction = None | Hit | Stand | DoubleDown | Split | Surrender deriving
 
 isPlayerFinished :: Player -> Bool
 isPlayerFinished p
-  | isLeft bs = True
-  | bs == Right 21 = True
+  | isBusted bs = True
+  | bs == blackjack = True
   | la == Stand = True
   | la == DoubleDown = True
   | la == Surrender = True
@@ -110,7 +110,7 @@ playerDecision p = do
 casinoDecision :: Player -> IO PlayerAction
 casinoDecision p =
   let cs = scores $ hand p
-      bs = fromRight 22 $ score $ hand p
+      bs = fromRight 22 $ getScore $ score $ hand p
       action =
         if bs < 17 || bs == 17 && minimum cs < 17
           then Hit
@@ -134,7 +134,7 @@ gameLoop table = do
   (p', d') <- playerLoop (player table) playerDecision (deck table)
   -- TODO: no need for casino loop if player busted
   (c', _) <- playerLoop (casino table) casinoDecision d'
-  return $ compareScore (score $ hand p') (score $ hand c')
+  return $ compare (score $ hand p') (score $ hand c')
 
 playGame :: Deck -> IO ()
 playGame d = gameLoop (newTable d) >>= print
